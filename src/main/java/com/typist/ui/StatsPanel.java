@@ -24,7 +24,11 @@ import java.sql.SQLException;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+
+import com.typist.engine.TypingEngine;
 
 public final class StatsPanel extends JPanel {
     private static final DateTimeFormatter TIME =
@@ -43,6 +47,9 @@ public final class StatsPanel extends JPanel {
     private final JTable sessionsTable;
     private final JComboBox<YearMonth> monthPicker;
     private boolean updatingMonths;
+    private boolean updatingSessions;
+    private TypingEngine liveEngine;
+    private String liveTextFile = "";
 
     public StatsPanel(StatsRepository stats) {
         this.stats = stats;
@@ -60,7 +67,7 @@ public final class StatsPanel extends JPanel {
         sessionsTable = styledTable(sessionsModel);
         sessionsTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         sessionsTable.getSelectionModel().addListSelectionListener(event -> {
-            if (!event.getValueIsAdjusting()) {
+            if (!event.getValueIsAdjusting() && !updatingSessions) {
                 loadSelectedSessionFailures();
             }
         });
@@ -76,7 +83,7 @@ public final class StatsPanel extends JPanel {
         );
         JSplitPane sessionSplit = new JSplitPane(
                 JSplitPane.HORIZONTAL_SPLIT,
-                wrap("Sessions — select a row to inspect failures", sessionsTable),
+                wrap("Sessions — current run updates live; select a saved row for history", sessionsTable),
                 sessionFailures
         );
         sessionSplit.setResizeWeight(0.62);
@@ -135,8 +142,11 @@ public final class StatsPanel extends JPanel {
     }
 
     public void reload() {
+        Long selectedId = selectedSessionId();
         YearMonth previouslySelected = (YearMonth) monthPicker.getSelectedItem();
+        updatingSessions = true;
         sessionsModel.setRowCount(0);
+        sessionsModel.addRow(liveRow());
         try {
             LetterFailure worst = stats.worstLetterOverall();
             BigramFailure worstBigram = stats.worstBigramOverall();
@@ -170,13 +180,38 @@ public final class StatsPanel extends JPanel {
             overallLabel.setText("Could not load stats: " + ex.getMessage());
             updatingMonths = false;
         }
-        if (sessionsModel.getRowCount() > 0) {
-            sessionsTable.setRowSelectionInterval(0, 0);
-        } else {
-            lettersModel.setRowCount(0);
-            bigramsModel.setRowCount(0);
-        }
+        int row = indexOfSession(selectedId == null ? 0L : selectedId);
+        sessionsTable.setRowSelectionInterval(row, row);
+        updatingSessions = false;
+        loadSelectedSessionFailures();
         loadMonthlyFailures();
+    }
+
+    public void refreshLive(TypingEngine engine, String textFile) {
+        refreshLive(engine, textFile, true);
+    }
+
+    public void refreshLive(TypingEngine engine, String textFile, boolean updateFailures) {
+        this.liveEngine = engine;
+        this.liveTextFile = textFile == null ? "" : textFile;
+        if (sessionsModel.getRowCount() == 0) {
+            updatingSessions = true;
+            sessionsModel.addRow(liveRow());
+            updatingSessions = false;
+        }
+        Object[] row = liveRow();
+        for (int column = 0; column < row.length; column++) {
+            sessionsModel.setValueAt(row[column], 0, column);
+        }
+        if (updateFailures && isLiveSelected()) {
+            fillFromEngine(engine);
+        }
+    }
+
+    public void showLiveSession() {
+        if (sessionsModel.getRowCount() > 0 && sessionsTable.getSelectedRow() != 0) {
+            sessionsTable.setRowSelectionInterval(0, 0);
+        }
     }
 
     private void loadMonthlyFailures() {
@@ -206,6 +241,17 @@ public final class StatsPanel extends JPanel {
     }
 
     private void loadSelectedSessionFailures() {
+        if (isLiveSelected()) {
+            if (liveEngine != null) {
+                fillFromEngine(liveEngine);
+            } else {
+                lettersModel.setRowCount(0);
+                bigramsModel.setRowCount(0);
+                fillLetters(lettersModel, List.of());
+                fillBigrams(bigramsModel, List.of());
+            }
+            return;
+        }
         lettersModel.setRowCount(0);
         bigramsModel.setRowCount(0);
         int row = sessionsTable.getSelectedRow();
@@ -219,6 +265,70 @@ public final class StatsPanel extends JPanel {
         } catch (SQLException ex) {
             lettersModel.addRow(new Object[]{ex.getMessage(), ""});
         }
+    }
+
+    private Object[] liveRow() {
+        if (liveEngine == null) {
+            return new Object[]{0L, "current", liveTextFile.isBlank() ? "—" : liveTextFile, "0.0", "100.0%", 0, "0.0s"};
+        }
+        return new Object[]{
+                0L,
+                liveEngine.isFinished() ? "current (done)" : "current",
+                liveTextFile.isBlank() ? "—" : liveTextFile,
+                String.format("%.1f", liveEngine.wordsPerMinute()),
+                String.format("%.1f%%", liveEngine.accuracyPercent()),
+                liveEngine.getErrorEvents(),
+                String.format("%.1fs", liveEngine.elapsedMillis() / 1000.0)
+        };
+    }
+
+    private void fillFromEngine(TypingEngine engine) {
+        List<LetterFailure> letters = new ArrayList<>();
+        for (Map.Entry<Character, Integer> entry : engine.getLetterFailures().entrySet()) {
+            letters.add(new LetterFailure(entry.getKey(), entry.getValue()));
+        }
+        letters.sort((a, b) -> {
+            int cmp = Integer.compare(b.failCount(), a.failCount());
+            return cmp != 0 ? cmp : Character.compare(a.letter(), b.letter());
+        });
+        List<BigramFailure> bigrams = new ArrayList<>();
+        for (Map.Entry<TypedBigram, Integer> entry : engine.getBigramFailures().entrySet()) {
+            bigrams.add(new BigramFailure(entry.getKey().previous(), entry.getKey().current(), entry.getValue()));
+        }
+        bigrams.sort((a, b) -> {
+            int cmp = Integer.compare(b.failCount(), a.failCount());
+            if (cmp != 0) {
+                return cmp;
+            }
+            cmp = Character.compare(a.previous(), b.previous());
+            return cmp != 0 ? cmp : Character.compare(a.current(), b.current());
+        });
+        lettersModel.setRowCount(0);
+        bigramsModel.setRowCount(0);
+        fillLetters(lettersModel, letters);
+        fillBigrams(bigramsModel, bigrams);
+    }
+
+    private boolean isLiveSelected() {
+        int row = sessionsTable.getSelectedRow();
+        return row < 0 || row == 0 && ((Number) sessionsModel.getValueAt(0, 0)).longValue() == 0L;
+    }
+
+    private Long selectedSessionId() {
+        int row = sessionsTable.getSelectedRow();
+        if (row < 0 || row >= sessionsModel.getRowCount()) {
+            return null;
+        }
+        return ((Number) sessionsModel.getValueAt(row, 0)).longValue();
+    }
+
+    private int indexOfSession(long sessionId) {
+        for (int i = 0; i < sessionsModel.getRowCount(); i++) {
+            if (((Number) sessionsModel.getValueAt(i, 0)).longValue() == sessionId) {
+                return i;
+            }
+        }
+        return 0;
     }
 
     private static void fillLetters(DefaultTableModel model, List<LetterFailure> failures) {

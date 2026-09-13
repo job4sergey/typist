@@ -120,6 +120,7 @@ public final class MainFrame extends JFrame {
 
         reloadTexts();
         statsPanel.reload();
+        statsPanel.refreshLive(engine, currentFileName);
         updateLiveStats();
     }
 
@@ -190,6 +191,10 @@ public final class MainFrame extends JFrame {
             pendingRecord = false;
         }
         updateLiveStats();
+        if (engine.isStarted()) {
+            statsPanel.showLiveSession();
+        }
+        statsPanel.refreshLive(engine, currentFileName, true);
     }
 
     private void persistPendingRecord() {
@@ -214,6 +219,7 @@ public final class MainFrame extends JFrame {
             );
             pendingRecord = false;
             statsPanel.reload();
+            statsPanel.refreshLive(engine, currentFileName);
         } catch (SQLException ex) {
             JOptionPane.showMessageDialog(this, "Could not save session: " + ex.getMessage());
         }
@@ -233,5 +239,6 @@ public final class MainFrame extends JFrame {
                 worstBigramText,
                 engine.isFinished() ? "done — Esc restarts a new run" : "press Esc to restart"
         ));
+        statsPanel.refreshLive(engine, currentFileName, false);
     }
 }
