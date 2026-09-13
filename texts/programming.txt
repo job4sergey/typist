@@ -1,0 +1,1 @@
+A function should do one thing well. Name variables for the next reader, keep methods short, and prefer simple loops over clever tricks. Tests catch the bugs that confidence forgets.

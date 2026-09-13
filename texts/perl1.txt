@@ -1,0 +1,1 @@
+my %count; for my $item (@items) { next unless defined $item; $count{$item}++; } my @sorted = sort { $count{$b} <=> $count{$a} || $a cmp $b } keys %count; for my $key (@sorted) { printf "%s => %d\n", $key, $count{$key}; }
