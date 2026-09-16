@@ -1,6 +1,7 @@
 # Compiled / packaged
 *.class
 *.jar
+!lib/*.jar
 *.war
 *.ear
 *.nar
@@ -43,6 +44,7 @@ build/
 .DS_Store
 Thumbs.db
 
-# Logs and local runtime data
+# Local javac output
+out/
 *.log
 typist.db
