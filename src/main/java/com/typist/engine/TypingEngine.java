@@ -16,6 +16,7 @@ public final class TypingEngine {
     private long startedAtNanos;
     private long finishedAtNanos;
     private int errorEvents;
+    private int correctKeystrokes;
     private final Map<Character, Integer> letterFailures = new HashMap<>();
     private final Map<TypedBigram, Integer> bigramFailures = new HashMap<>();
 
@@ -31,6 +32,7 @@ public final class TypingEngine {
         startedAtNanos = 0;
         finishedAtNanos = 0;
         errorEvents = 0;
+        correctKeystrokes = 0;
         letterFailures.clear();
         bigramFailures.clear();
     }
@@ -88,11 +90,11 @@ public final class TypingEngine {
     }
 
     public double accuracyPercent() {
-        int typed = getTypedCount();
-        if (typed == 0) {
+        int total = correctKeystrokes + errorEvents;
+        if (total == 0) {
             return 100.0;
         }
-        return 100.0 * getCorrectCount() / typed;
+        return 100.0 * correctKeystrokes / total;
     }
 
     public long elapsedMillis() {
@@ -164,6 +166,7 @@ public final class TypingEngine {
         char expected = text.charAt(caret);
         if (ch == expected) {
             states[caret] = CharState.CORRECT;
+            correctKeystrokes++;
         } else {
             states[caret] = CharState.ERROR;
             errorEvents++;

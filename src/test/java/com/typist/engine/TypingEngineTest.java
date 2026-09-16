@@ -27,6 +27,19 @@ class TypingEngineTest {
     }
 
     @Test
+    void accuracyUsesCorrectOverCorrectPlusIncorrectKeystrokes() {
+        TypingEngine engine = new TypingEngine();
+        engine.load("ab");
+        engine.handleKey('x', KeyEvent.VK_X, true);
+        engine.handleKey('\b', KeyEvent.VK_BACK_SPACE, false);
+        engine.handleKey('a', KeyEvent.VK_A, true);
+        engine.handleKey('b', KeyEvent.VK_B, true);
+        assertEquals(CharState.CORRECT, engine.stateAt(0));
+        assertEquals(CharState.CORRECT, engine.stateAt(1));
+        assertEquals(200.0 / 3.0, engine.accuracyPercent(), 0.01);
+    }
+
+    @Test
     void firstCharacterErrorDoesNotRecordABigram() {
         TypingEngine engine = new TypingEngine();
         engine.load("ab");

@@ -1,0 +1,1 @@
+my $total = 0; for my $item (@items) { next unless defined $item; $total += $item; $count{$item}++; } my $best = $items[0]; for my $value (@items) { $best = $value if $value > $best; } if ($total > 0) { $result{$best} = $total; } return $result{$best};
