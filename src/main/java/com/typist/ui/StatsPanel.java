@@ -7,19 +7,29 @@ import com.typist.db.SessionRecord;
 import com.typist.db.StatsRepository;
 import com.typist.engine.TypedBigram;
 
+import javax.swing.AbstractCellEditor;
 import javax.swing.BorderFactory;
+import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.ListSelectionModel;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableCellEditor;
+import javax.swing.table.TableCellRenderer;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Font;
+import java.io.File;
+import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.YearMonth;
 import java.time.ZoneId;
@@ -37,6 +47,7 @@ public final class StatsPanel extends JPanel {
             DateTimeFormatter.ofPattern("yyyy-MM");
 
     private final StatsRepository stats;
+    private final Path exportsDir;
     private final DefaultTableModel sessionsModel;
     private final DefaultTableModel lettersModel;
     private final DefaultTableModel bigramsModel;
@@ -52,7 +63,12 @@ public final class StatsPanel extends JPanel {
     private String liveTextFile = "";
 
     public StatsPanel(StatsRepository stats) {
+        this(stats, Path.of("exports"));
+    }
+
+    public StatsPanel(StatsRepository stats, Path exportsDir) {
         this.stats = stats;
+        this.exportsDir = exportsDir;
         setLayout(new BorderLayout(8, 8));
         setBackground(Theme.SURFACE);
         setOpaque(true);
@@ -63,14 +79,27 @@ public final class StatsPanel extends JPanel {
         overallLabel.setBorder(BorderFactory.createEmptyBorder(4, 8, 0, 8));
         add(overallLabel, BorderLayout.NORTH);
 
-        sessionsModel = unreadOnlyModel("ID", "When", "Text", "WPM", "Accuracy", "Errors", "Duration");
+        sessionsModel = new DefaultTableModel(
+                new String[]{"ID", "When", "Text", "WPM", "Accuracy", "Errors", "Duration", "Export"}, 0
+        ) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return column == getColumnCount() - 1 && sessionIdAt(row) > 0;
+            }
+        };
         sessionsTable = styledTable(sessionsModel);
+        sessionsTable.setRowHeight(28);
         sessionsTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         sessionsTable.getSelectionModel().addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting() && !updatingSessions) {
                 loadSelectedSessionFailures();
             }
         });
+        int exportColumn = sessionsModel.getColumnCount() - 1;
+        sessionsTable.getColumnModel().getColumn(exportColumn).setCellRenderer(new ExportButtonRenderer());
+        sessionsTable.getColumnModel().getColumn(exportColumn).setCellEditor(new ExportButtonEditor());
+        sessionsTable.getColumnModel().getColumn(exportColumn).setMinWidth(88);
+        sessionsTable.getColumnModel().getColumn(exportColumn).setMaxWidth(100);
 
         lettersModel = unreadOnlyModel("Letter", "Failures");
         bigramsModel = unreadOnlyModel("Bigram", "Failures");
@@ -164,7 +193,8 @@ public final class StatsPanel extends JPanel {
                         String.format("%.1f", session.wpm()),
                         String.format("%.1f%%", session.accuracy()),
                         session.errorEvents(),
-                        String.format("%.1fs", session.durationMs() / 1000.0)
+                        String.format("%.1fs", session.durationMs() / 1000.0),
+                        "Export"
                 });
             }
             updatingMonths = true;
@@ -185,6 +215,42 @@ public final class StatsPanel extends JPanel {
         updatingSessions = false;
         loadSelectedSessionFailures();
         loadMonthlyFailures();
+    }
+
+    private void exportSessionWithChooser(long sessionId) {
+        File downloads = Path.of(System.getProperty("user.home"), "Downloads").toFile();
+        if (!downloads.isDirectory()) {
+            downloads = new File(System.getProperty("user.home"));
+        }
+        JFileChooser chooser = new JFileChooser(downloads);
+        chooser.setDialogTitle("Export word timings");
+        chooser.setSelectedFile(new File(downloads, "word_timings.json"));
+        chooser.setFileFilter(new FileNameExtensionFilter("JSON files", "json"));
+        chooser.setAcceptAllFileFilterUsed(true);
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        File chosen = chooser.getSelectedFile();
+        if (chosen == null) {
+            return;
+        }
+        if (!chosen.getName().toLowerCase().endsWith(".json")) {
+            chosen = new File(chosen.getParentFile(), chosen.getName() + ".json");
+        }
+        try {
+            Path file = stats.exportSessionWordsJsonToFile(sessionId, chosen.toPath());
+            JOptionPane.showMessageDialog(this, "Wrote " + file.toAbsolutePath());
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Export failed: " + ex.getMessage());
+        }
+    }
+
+    private long sessionIdAt(int row) {
+        if (row < 0 || row >= sessionsModel.getRowCount()) {
+            return -1;
+        }
+        Object value = sessionsModel.getValueAt(row, 0);
+        return value instanceof Number number ? number.longValue() : -1;
     }
 
     public void refreshLive(TypingEngine engine, String textFile) {
@@ -212,6 +278,15 @@ public final class StatsPanel extends JPanel {
         if (sessionsModel.getRowCount() > 0 && sessionsTable.getSelectedRow() != 0) {
             sessionsTable.setRowSelectionInterval(0, 0);
         }
+    }
+
+    public void selectSession(long sessionId) {
+        if (sessionsModel.getRowCount() == 0) {
+            return;
+        }
+        int row = indexOfSession(sessionId);
+        sessionsTable.setRowSelectionInterval(row, row);
+        loadSelectedSessionFailures();
     }
 
     private void loadMonthlyFailures() {
@@ -269,7 +344,7 @@ public final class StatsPanel extends JPanel {
 
     private Object[] liveRow() {
         if (liveEngine == null) {
-            return new Object[]{0L, "current", liveTextFile.isBlank() ? "—" : liveTextFile, "0.0", "100.0%", 0, "0.0s"};
+            return new Object[]{0L, "current", liveTextFile.isBlank() ? "—" : liveTextFile, "0.0", "100.0%", 0, "0.0s", ""};
         }
         return new Object[]{
                 0L,
@@ -278,7 +353,8 @@ public final class StatsPanel extends JPanel {
                 String.format("%.1f", liveEngine.wordsPerMinute()),
                 String.format("%.1f%%", liveEngine.accuracyPercent()),
                 liveEngine.getErrorEvents(),
-                String.format("%.1fs", liveEngine.elapsedMillis() / 1000.0)
+                String.format("%.1fs", liveEngine.elapsedMillis() / 1000.0),
+                ""
         };
     }
 
@@ -426,5 +502,59 @@ public final class StatsPanel extends JPanel {
             return "—";
         }
         return formatBigram(worst.previous(), worst.current()) + " (" + worst.failCount() + ")";
+    }
+
+    private final class ExportButtonRenderer extends JButton implements TableCellRenderer {
+        ExportButtonRenderer() {
+            setOpaque(true);
+            setForeground(Color.BLACK);
+            setBackground(Theme.ACCENT);
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(
+                JTable table, Object value, boolean selected, boolean focused, int row, int column
+        ) {
+            long sessionId = sessionIdAt(row);
+            if (sessionId <= 0) {
+                JLabel empty = new JLabel("");
+                empty.setOpaque(true);
+                empty.setBackground(selected ? table.getSelectionBackground() : table.getBackground());
+                return empty;
+            }
+            setText("Export");
+            setBackground(selected ? Theme.CARET : Theme.ACCENT);
+            return this;
+        }
+    }
+
+    private final class ExportButtonEditor extends AbstractCellEditor implements TableCellEditor {
+        private final JButton button = new JButton("Export");
+        private long sessionId;
+
+        ExportButtonEditor() {
+            button.setForeground(Color.BLACK);
+            button.setBackground(Theme.ACCENT);
+            button.addActionListener(event -> {
+                long id = sessionId;
+                fireEditingStopped();
+                if (id > 0) {
+                    exportSessionWithChooser(id);
+                }
+            });
+        }
+
+        @Override
+        public Component getTableCellEditorComponent(
+                JTable table, Object value, boolean selected, int row, int column
+        ) {
+            sessionId = sessionIdAt(row);
+            return button;
+        }
+
+        @Override
+        public Object getCellEditorValue() {
+            return "Export";
+        }
     }
 }

@@ -1,0 +1,1 @@
+my %seen; for my $event (@events) { next unless $event->{state} eq "ready"; my $user = $event->{user}; next if $seen{$user}++; if ($event->{score} > 0) { $result{$user} = $event->{score}; } else { $result{$user} = 0; } } return \%result;

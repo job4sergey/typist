@@ -99,4 +99,46 @@ class TypingEngineTest {
         assertEquals(0, engine.getCaret());
         assertEquals(CharState.PENDING, engine.stateAt(0));
     }
+
+    @Test
+    void recordsPerOccurrenceWordTimingsFromKeyTimestamps() {
+        TypingEngine engine = new TypingEngine();
+        java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong(1_000_000_000L);
+        engine.setClock(clock::get);
+        engine.load("hi to");
+
+        typeAfter(engine, clock, 'h', 0);
+        typeAfter(engine, clock, 'i', 200);
+        typeAfter(engine, clock, ' ', 80);
+        typeAfter(engine, clock, 'x', 50);
+        engine.handleKey('\b', KeyEvent.VK_BACK_SPACE, false);
+        typeAfter(engine, clock, 't', 40);
+        typeAfter(engine, clock, 'o', 100);
+
+        java.util.List<WordOccurrence> words = engine.wordOccurrences();
+        assertEquals(2, words.size());
+        WordOccurrence hi = words.get(0);
+        assertEquals("hi", hi.word());
+        assertEquals(0, hi.startMs());
+        assertEquals(200, hi.endMs());
+        assertEquals(200, hi.durationMs());
+        assertEquals(200.0, hi.msPerChar(), 0.01);
+        assertEquals(170L, hi.transitionMs());
+        assertEquals(0, hi.errors());
+
+        WordOccurrence to = words.get(1);
+        assertEquals("to", to.word());
+        assertEquals(1, to.errors());
+        assertEquals(1, to.corrections());
+        assertEquals(null, to.transitionMs());
+        assertEquals(370, to.startMs());
+        assertEquals(470, to.endMs());
+    }
+
+    private static void typeAfter(TypingEngine engine, java.util.concurrent.atomic.AtomicLong clock, char ch, long delayMs) {
+        if (delayMs > 0) {
+            clock.addAndGet(delayMs * 1_000_000L);
+        }
+        engine.handleKey(ch, KeyEvent.VK_UNDEFINED, true);
+    }
 }

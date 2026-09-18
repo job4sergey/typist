@@ -48,6 +48,7 @@ The bottom panel tracks:
 - **Current** row — WPM, accuracy, letter failures, and bigram failures for the run in progress (updates as you type)
 - **Sessions** — saved runs; select a row to inspect that session’s letter and bigram failures
 - **Monthly** — the same failure totals aggregated by calendar month
+- **Word timings** — **Export** writes a JSON file (defaults to `~/Downloads/word_timings.json`) with WPM, accuracy, letter failures, bigram failures, and per-word timings.
 
 Data lives in `typist.db` in the working directory (created automatically). Bigrams are the expected character plus the character before it (not recorded for the first character of a text).
 

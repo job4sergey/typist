@@ -23,7 +23,7 @@ public final class TypistApp {
             } catch (Exception ignored) {
                 // keep default look and feel
             }
-            MainFrame frame = new MainFrame(texts, stats);
+            MainFrame frame = new MainFrame(texts, stats, root.resolve("exports"));
             frame.setSize(1100, 760);
             frame.setLocationRelativeTo(null);
             frame.setVisible(true);

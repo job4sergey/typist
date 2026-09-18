@@ -1,0 +1,1 @@
+my @ready; for my $task (@tasks) { next unless $task->{status} eq "open"; my $score = $task->{value} // 0; if ($score >= 10) { push @ready, $task; } else { $task->{status} = "skip"; } } return \@ready;

@@ -3,7 +3,11 @@ package com.typist.engine;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.LongSupplier;
 
 /**
  * Character-by-character typing state. Wrong keys mark the expected letter
@@ -17,8 +21,10 @@ public final class TypingEngine {
     private long finishedAtNanos;
     private int errorEvents;
     private int correctKeystrokes;
+    private LongSupplier clock = System::nanoTime;
     private final Map<Character, Integer> letterFailures = new HashMap<>();
     private final Map<TypedBigram, Integer> bigramFailures = new HashMap<>();
+    private final WordTimingCollector wordTimings = new WordTimingCollector();
 
     public void load(String source) {
         text = source == null ? "" : source.replace("\r\n", "\n").replace('\r', '\n');
@@ -35,6 +41,15 @@ public final class TypingEngine {
         correctKeystrokes = 0;
         letterFailures.clear();
         bigramFailures.clear();
+        wordTimings.reset(text);
+    }
+
+    public void setClock(LongSupplier clock) {
+        this.clock = clock == null ? System::nanoTime : clock;
+    }
+
+    public List<WordOccurrence> wordOccurrences() {
+        return wordTimings.snapshot();
     }
 
     public String getText() {
@@ -101,7 +116,7 @@ public final class TypingEngine {
         if (startedAtNanos == 0) {
             return 0;
         }
-        long end = finishedAtNanos > 0 ? finishedAtNanos : System.nanoTime();
+        long end = finishedAtNanos > 0 ? finishedAtNanos : now();
         return Math.max(0, (end - startedAtNanos) / 1_000_000L);
     }
 
@@ -163,13 +178,16 @@ public final class TypingEngine {
             return false;
         }
         markStart();
+        long relativeMs = relativeMs();
         char expected = text.charAt(caret);
         if (ch == expected) {
             states[caret] = CharState.CORRECT;
             correctKeystrokes++;
+            wordTimings.onCorrect(caret, relativeMs);
         } else {
             states[caret] = CharState.ERROR;
             errorEvents++;
+            wordTimings.onIncorrect(caret);
             letterFailures.merge(Character.toLowerCase(expected), 1, Integer::sum);
             if (caret > 0) {
                 char previous = Character.toLowerCase(text.charAt(caret - 1));
@@ -179,7 +197,7 @@ public final class TypingEngine {
         }
         caret++;
         if (caret >= text.length()) {
-            finishedAtNanos = System.nanoTime();
+            finishedAtNanos = now();
         }
         return true;
     }
@@ -189,6 +207,8 @@ public final class TypingEngine {
             return false;
         }
         caret--;
+        wordTimings.addCorrection(caret);
+        wordTimings.revert(caret);
         states[caret] = CharState.PENDING;
         finishedAtNanos = 0;
         return true;
@@ -203,9 +223,27 @@ public final class TypingEngine {
         if (target >= caret) {
             return false;
         }
+        Set<Integer> affected = new HashSet<>();
         while (caret > target) {
             caret--;
+            int word = wordTimings.wordIndexAt(caret);
+            if (word >= 0) {
+                affected.add(word);
+            } else {
+                word = wordTimings.wordIndexAt(Math.max(0, caret - 1));
+                if (word >= 0) {
+                    affected.add(word);
+                }
+            }
+            wordTimings.revert(caret);
             states[caret] = CharState.PENDING;
+        }
+        if (affected.isEmpty()) {
+            wordTimings.addCorrection(caret);
+        } else {
+            for (int word : affected) {
+                wordTimings.addCorrectionForWord(word);
+            }
         }
         finishedAtNanos = 0;
         return true;
@@ -227,7 +265,15 @@ public final class TypingEngine {
 
     private void markStart() {
         if (startedAtNanos == 0) {
-            startedAtNanos = System.nanoTime();
+            startedAtNanos = now();
         }
+    }
+
+    private long now() {
+        return clock.getAsLong();
+    }
+
+    private long relativeMs() {
+        return Math.max(0L, (now() - startedAtNanos) / 1_000_000L);
     }
 }

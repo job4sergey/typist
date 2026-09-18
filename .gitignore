@@ -46,5 +46,6 @@ Thumbs.db
 
 # Local javac output
 out/
+exports/
 *.log
 typist.db

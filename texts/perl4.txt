@@ -1,0 +1,1 @@
+sub sum_values { my ($user, $items) = @_; my $sum = 0; for my $value (@$items) { next unless defined $value; $sum += $value; } if ($sum > 0) { $result{$user} = $sum; } else { delete $result{$user}; } return $result{$user};

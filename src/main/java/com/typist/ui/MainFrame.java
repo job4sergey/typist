@@ -7,6 +7,7 @@ import com.typist.io.TextLibrary;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
+import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -38,16 +39,23 @@ public final class MainFrame extends JFrame {
     private final JLabel liveStats = new JLabel(" ", SwingConstants.CENTER);
     private final TypingPane typingPane;
     private final StatsPanel statsPanel;
+    private final Path exportsDir;
     private List<Path> textFiles = List.of();
     private String currentFileName = "";
     private boolean pendingRecord;
+    private boolean suppressTextLoad;
 
     public MainFrame(TextLibrary texts, StatsRepository stats) {
+        this(texts, stats, Path.of("exports"));
+    }
+
+    public MainFrame(TextLibrary texts, StatsRepository stats, Path exportsDir) {
         super("Typist");
         this.texts = texts;
         this.stats = stats;
+        this.exportsDir = exportsDir;
         this.typingPane = new TypingPane(engine, this::onEngineChanged);
-        this.statsPanel = new StatsPanel(stats);
+        this.statsPanel = new StatsPanel(stats, exportsDir);
 
         setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         getContentPane().setBackground(Theme.BACKGROUND);
@@ -60,22 +68,40 @@ public final class MainFrame extends JFrame {
         textList.setSelectionForeground(java.awt.Color.BLACK);
         textList.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
         textList.addListSelectionListener(event -> {
-            if (!event.getValueIsAdjusting()) {
+            if (!event.getValueIsAdjusting() && !suppressTextLoad) {
                 loadSelectedText();
             }
         });
 
         JScrollPane listScroll = new JScrollPane(textList);
-        listScroll.setBorder(BorderFactory.createTitledBorder(
+        listScroll.setBorder(null);
+        listScroll.getViewport().setBackground(Theme.SURFACE);
+
+        JButton refreshTexts = new JButton("Refresh");
+        refreshTexts.setBackground(Theme.SURFACE);
+        refreshTexts.setForeground(Theme.ACCENT);
+        refreshTexts.addActionListener(event -> reloadTexts());
+
+        JPanel textsHeader = new JPanel(new BorderLayout(4, 0));
+        textsHeader.setOpaque(false);
+        JLabel textsLabel = new JLabel("Texts");
+        textsLabel.setForeground(Theme.MUTED);
+        textsHeader.add(textsLabel, BorderLayout.WEST);
+        textsHeader.add(refreshTexts, BorderLayout.EAST);
+
+        JPanel textsPanel = new JPanel(new BorderLayout(4, 4));
+        textsPanel.setBackground(Theme.SURFACE);
+        textsPanel.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createLineBorder(Theme.TEXT_PENDING),
-                "Texts",
+                null,
                 0,
                 0,
                 null,
                 Theme.MUTED
         ));
-        listScroll.setPreferredSize(new Dimension(220, 0));
-        listScroll.getViewport().setBackground(Theme.SURFACE);
+        textsPanel.setPreferredSize(new Dimension(220, 0));
+        textsPanel.add(textsHeader, BorderLayout.NORTH);
+        textsPanel.add(listScroll, BorderLayout.CENTER);
 
         liveStats.setForeground(Theme.ACCENT);
         liveStats.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 16));
@@ -94,7 +120,7 @@ public final class MainFrame extends JFrame {
         center.add(typingScroll, BorderLayout.CENTER);
         center.add(hint, BorderLayout.SOUTH);
 
-        JSplitPane mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, listScroll, center);
+        JSplitPane mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, textsPanel, center);
         mainSplit.setDividerLocation(220);
         mainSplit.setBorder(null);
 
@@ -125,22 +151,47 @@ public final class MainFrame extends JFrame {
     }
 
     private void reloadTexts() {
+        String keep = currentFileName;
+        suppressTextLoad = true;
         textNames.clear();
         try {
             textFiles = texts.listTextFiles();
             for (Path file : textFiles) {
                 textNames.addElement(file.getFileName().toString());
             }
-            if (!textFiles.isEmpty()) {
-                textList.setSelectedIndex(indexOfLastUsedText());
-            } else {
+            if (textFiles.isEmpty()) {
+                suppressTextLoad = false;
                 engine.load("Add .txt files to " + texts.getTextsDir().toAbsolutePath());
                 currentFileName = "";
                 typingPane.refresh();
+                return;
+            }
+            int index = indexOfFileName(keep);
+            if (index < 0) {
+                index = indexOfLastUsedText();
+            }
+            textList.setSelectedIndex(index);
+            suppressTextLoad = false;
+            String selected = textFiles.get(index).getFileName().toString();
+            if (!selected.equals(keep) || engine.getText().isEmpty()) {
+                loadSelectedText();
             }
         } catch (IOException ex) {
+            suppressTextLoad = false;
             JOptionPane.showMessageDialog(this, "Could not read texts folder: " + ex.getMessage());
         }
+    }
+
+    private int indexOfFileName(String name) {
+        if (name == null || name.isBlank()) {
+            return -1;
+        }
+        for (int i = 0; i < textFiles.size(); i++) {
+            if (name.equals(textFiles.get(i).getFileName().toString())) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private int indexOfLastUsedText() {
@@ -191,6 +242,9 @@ public final class MainFrame extends JFrame {
             pendingRecord = false;
         }
         updateLiveStats();
+        if (engine.isFinished()) {
+            return;
+        }
         if (engine.isStarted()) {
             statsPanel.showLiveSession();
         }
@@ -204,7 +258,7 @@ public final class MainFrame extends JFrame {
         try {
             Instant finished = Instant.now();
             Instant started = finished.minusMillis(engine.elapsedMillis());
-            stats.saveCompletedSession(
+            long sessionId = stats.saveCompletedSession(
                     started,
                     finished,
                     currentFileName,
@@ -215,10 +269,17 @@ public final class MainFrame extends JFrame {
                     engine.accuracyPercent(),
                     engine.elapsedMillis(),
                     engine.getLetterFailures(),
-                    engine.getBigramFailures()
+                    engine.getBigramFailures(),
+                    engine.wordOccurrences()
             );
             pendingRecord = false;
+            try {
+                stats.exportSessionWordsJson(sessionId, exportsDir);
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "Session saved, but word JSON export failed: " + ex.getMessage());
+            }
             statsPanel.reload();
+            statsPanel.selectSession(sessionId);
             statsPanel.refreshLive(engine, currentFileName);
         } catch (SQLException ex) {
             JOptionPane.showMessageDialog(this, "Could not save session: " + ex.getMessage());

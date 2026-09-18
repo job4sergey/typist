@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.typist.engine.TypedBigram;
+import com.typist.engine.WordOccurrence;
 
 public final class StatsRepository implements AutoCloseable {
     private final Connection connection;
@@ -59,6 +60,24 @@ public final class StatsRepository implements AutoCloseable {
                         previous_char TEXT NOT NULL,
                         current_char TEXT NOT NULL,
                         fail_count INTEGER NOT NULL
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS word_timings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                        word_index INTEGER NOT NULL,
+                        word TEXT NOT NULL,
+                        start_offset INTEGER NOT NULL,
+                        end_offset INTEGER NOT NULL,
+                        start_ms INTEGER NOT NULL,
+                        end_ms INTEGER NOT NULL,
+                        duration_ms INTEGER NOT NULL,
+                        length INTEGER NOT NULL,
+                        ms_per_char REAL NOT NULL,
+                        transition_ms INTEGER,
+                        errors INTEGER NOT NULL,
+                        corrections INTEGER NOT NULL
                     )
                     """);
         }
@@ -121,6 +140,26 @@ public final class StatsRepository implements AutoCloseable {
             Map<Character, Integer> letterFailures,
             Map<TypedBigram, Integer> bigramFailures
     ) throws SQLException {
+        return saveCompletedSession(
+                startedAt, finishedAt, textFile, charsTyped, correctChars, errorEvents,
+                wpm, accuracy, durationMs, letterFailures, bigramFailures, List.of()
+        );
+    }
+
+    public long saveCompletedSession(
+            Instant startedAt,
+            Instant finishedAt,
+            String textFile,
+            int charsTyped,
+            int correctChars,
+            int errorEvents,
+            double wpm,
+            double accuracy,
+            long durationMs,
+            Map<Character, Integer> letterFailures,
+            Map<TypedBigram, Integer> bigramFailures,
+            List<WordOccurrence> wordOccurrences
+    ) throws SQLException {
         connection.setAutoCommit(false);
         try {
             long sessionId;
@@ -175,6 +214,37 @@ public final class StatsRepository implements AutoCloseable {
                     insertBigram.addBatch();
                 }
                 insertBigram.executeBatch();
+            }
+            try (PreparedStatement insertWord = connection.prepareStatement(
+                    """
+                    INSERT INTO word_timings (
+                        session_id, word_index, word, start_offset, end_offset,
+                        start_ms, end_ms, duration_ms, length, ms_per_char,
+                        transition_ms, errors, corrections
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+            )) {
+                for (WordOccurrence word : wordOccurrences) {
+                    insertWord.setLong(1, sessionId);
+                    insertWord.setInt(2, word.index());
+                    insertWord.setString(3, word.word());
+                    insertWord.setInt(4, word.startOffset());
+                    insertWord.setInt(5, word.endOffset());
+                    insertWord.setLong(6, word.startMs());
+                    insertWord.setLong(7, word.endMs());
+                    insertWord.setLong(8, word.durationMs());
+                    insertWord.setInt(9, word.length());
+                    insertWord.setDouble(10, word.msPerChar());
+                    if (word.transitionMs() == null) {
+                        insertWord.setObject(11, null);
+                    } else {
+                        insertWord.setLong(11, word.transitionMs());
+                    }
+                    insertWord.setInt(12, word.errors());
+                    insertWord.setInt(13, word.corrections());
+                    insertWord.addBatch();
+                }
+                insertWord.executeBatch();
             }
             connection.commit();
             return sessionId;
@@ -254,6 +324,71 @@ public final class StatsRepository implements AutoCloseable {
     public LetterFailure worstLetterOverall() throws SQLException {
         List<LetterFailure> all = overallLetterFailures();
         return all.isEmpty() ? null : all.get(0);
+    }
+
+    public List<WordOccurrence> wordTimingsForSession(long sessionId) throws SQLException {
+        List<WordOccurrence> words = new ArrayList<>();
+        try (PreparedStatement query = connection.prepareStatement(
+                """
+                SELECT word_index, word, start_offset, end_offset, start_ms, end_ms,
+                       duration_ms, length, ms_per_char, transition_ms, errors, corrections
+                FROM word_timings
+                WHERE session_id = ?
+                ORDER BY word_index ASC
+                """
+        )) {
+            query.setLong(1, sessionId);
+            try (ResultSet rows = query.executeQuery()) {
+                while (rows.next()) {
+                    Long transition = rows.getObject("transition_ms") == null
+                            ? null
+                            : rows.getLong("transition_ms");
+                    words.add(new WordOccurrence(
+                            rows.getInt("word_index"),
+                            rows.getString("word"),
+                            rows.getInt("start_offset"),
+                            rows.getInt("end_offset"),
+                            rows.getLong("start_ms"),
+                            rows.getLong("end_ms"),
+                            rows.getLong("duration_ms"),
+                            rows.getInt("length"),
+                            rows.getDouble("ms_per_char"),
+                            transition,
+                            rows.getInt("errors"),
+                            rows.getInt("corrections")
+                    ));
+                }
+            }
+        }
+        return words;
+    }
+
+    public String sessionWordsJson(long sessionId) throws SQLException {
+        SessionRecord session = findSession(sessionId);
+        if (session == null) {
+            throw new SQLException("Unknown session " + sessionId);
+        }
+        return SessionWordsJson.render(
+                session,
+                letterFailuresForSession(sessionId),
+                bigramFailuresForSession(sessionId),
+                wordTimingsForSession(sessionId)
+        );
+    }
+
+    public Path exportSessionWordsJson(long sessionId, Path directory) throws SQLException, java.io.IOException {
+        java.nio.file.Files.createDirectories(directory);
+        Path file = directory.resolve("session-" + sessionId + ".json");
+        return exportSessionWordsJsonToFile(sessionId, file);
+    }
+
+    public Path exportSessionWordsJsonToFile(long sessionId, Path file) throws SQLException, java.io.IOException {
+        Path parent = file.getParent();
+        if (parent != null) {
+            java.nio.file.Files.createDirectories(parent);
+        }
+        java.nio.file.Files.writeString(file, sessionWordsJson(sessionId));
+        return file;
     }
 
     public List<BigramFailure> bigramFailuresForSession(long sessionId) throws SQLException {
