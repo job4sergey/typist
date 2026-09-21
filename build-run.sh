@@ -22,8 +22,8 @@ if [[ ! -f "$SQLITE_JAR" ]]; then
 fi
 
 mkdir -p "$OUT"
-mapfile -t SOURCES < <(find "$ROOT/src/main/java" -name '*.java' | sort)
-"$JAVAC" --release 17 -encoding UTF-8 -d "$OUT" -cp "$SQLITE_JAR" "${SOURCES[@]}"
+"$JAVAC" --release 17 -encoding UTF-8 -d "$OUT" -cp "$SQLITE_JAR" \
+  $(find "$ROOT/src/main/java" -name '*.java' | sort)
 
 nohup "$JAVA" -cp "$OUT:$SQLITE_JAR" com.typist.TypistApp >/dev/null 2>&1 &
 disown
