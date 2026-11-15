@@ -7,10 +7,12 @@ import com.typist.db.SessionRecord;
 import com.typist.db.StatsRepository;
 import com.typist.engine.TypedBigram;
 
+import javax.swing.AbstractAction;
 import javax.swing.AbstractCellEditor;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -19,6 +21,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
+import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
@@ -28,6 +31,8 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.io.File;
 import java.nio.file.Path;
 import java.sql.SQLException;
@@ -77,7 +82,17 @@ public final class StatsPanel extends JPanel {
         overallLabel.setForeground(Theme.ACCENT);
         overallLabel.setFont(overallLabel.getFont().deriveFont(Font.BOLD, 14f));
         overallLabel.setBorder(BorderFactory.createEmptyBorder(4, 8, 0, 8));
-        add(overallLabel, BorderLayout.NORTH);
+
+        JButton topErrors = new JButton("Top Errors");
+        topErrors.setBackground(Theme.SURFACE);
+        topErrors.setForeground(Theme.ACCENT);
+        topErrors.addActionListener(event -> exportTopErrorsWithChooser());
+
+        JPanel statsHeader = new JPanel(new BorderLayout(8, 0));
+        statsHeader.setOpaque(false);
+        statsHeader.add(overallLabel, BorderLayout.CENTER);
+        statsHeader.add(topErrors, BorderLayout.EAST);
+        add(statsHeader, BorderLayout.NORTH);
 
         sessionsModel = new DefaultTableModel(
                 new String[]{"ID", "When", "Text", "WPM", "Accuracy", "Errors", "Duration", "Export"}, 0
@@ -100,6 +115,7 @@ public final class StatsPanel extends JPanel {
         sessionsTable.getColumnModel().getColumn(exportColumn).setCellEditor(new ExportButtonEditor());
         sessionsTable.getColumnModel().getColumn(exportColumn).setMinWidth(88);
         sessionsTable.getColumnModel().getColumn(exportColumn).setMaxWidth(100);
+        bindEnterToExport();
 
         lettersModel = unreadOnlyModel("Letter", "Failures");
         bigramsModel = unreadOnlyModel("Bigram", "Failures");
@@ -217,25 +233,32 @@ public final class StatsPanel extends JPanel {
         loadMonthlyFailures();
     }
 
-    private void exportSessionWithChooser(long sessionId) {
-        File downloads = Path.of(System.getProperty("user.home"), "Downloads").toFile();
-        if (!downloads.isDirectory()) {
-            downloads = new File(System.getProperty("user.home"));
-        }
-        JFileChooser chooser = new JFileChooser(downloads);
-        chooser.setDialogTitle("Export word timings");
-        chooser.setSelectedFile(new File(downloads, "word_timings.json"));
-        chooser.setFileFilter(new FileNameExtensionFilter("JSON files", "json"));
-        chooser.setAcceptAllFileFilterUsed(true);
-        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+    void exportSelectedSavedSession() {
+        Long id = selectedSessionId();
+        if (id == null || id <= 0) {
             return;
         }
-        File chosen = chooser.getSelectedFile();
+        exportSessionWithChooser(id);
+    }
+
+    private void bindEnterToExport() {
+        KeyStroke enter = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0);
+        AbstractAction exportSelected = new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                exportSelectedSavedSession();
+            }
+        };
+        sessionsTable.getInputMap(JComponent.WHEN_FOCUSED).put(enter, "export-selected-session");
+        sessionsTable.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                .put(enter, "export-selected-session");
+        sessionsTable.getActionMap().put("export-selected-session", exportSelected);
+    }
+
+    private void exportSessionWithChooser(long sessionId) {
+        File chosen = chooseJsonFile("Export word timings", "word_timings.json");
         if (chosen == null) {
             return;
-        }
-        if (!chosen.getName().toLowerCase().endsWith(".json")) {
-            chosen = new File(chosen.getParentFile(), chosen.getName() + ".json");
         }
         try {
             Path file = stats.exportSessionWordsJsonToFile(sessionId, chosen.toPath());
@@ -243,6 +266,42 @@ public final class StatsPanel extends JPanel {
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "Export failed: " + ex.getMessage());
         }
+    }
+
+    private void exportTopErrorsWithChooser() {
+        File chosen = chooseJsonFile("Export top errors", "top_errors.json");
+        if (chosen == null) {
+            return;
+        }
+        try {
+            Path file = stats.exportTopErrorsJsonToFile(chosen.toPath(), 50);
+            JOptionPane.showMessageDialog(this, "Wrote " + file.toAbsolutePath());
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Export failed: " + ex.getMessage());
+        }
+    }
+
+    private File chooseJsonFile(String title, String defaultName) {
+        File downloads = Path.of(System.getProperty("user.home"), "Downloads").toFile();
+        if (!downloads.isDirectory()) {
+            downloads = new File(System.getProperty("user.home"));
+        }
+        JFileChooser chooser = new JFileChooser(downloads);
+        chooser.setDialogTitle(title);
+        chooser.setSelectedFile(new File(downloads, defaultName));
+        chooser.setFileFilter(new FileNameExtensionFilter("JSON files", "json"));
+        chooser.setAcceptAllFileFilterUsed(true);
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        File chosen = chooser.getSelectedFile();
+        if (chosen == null) {
+            return null;
+        }
+        if (!chosen.getName().toLowerCase().endsWith(".json")) {
+            chosen = new File(chosen.getParentFile(), chosen.getName() + ".json");
+        }
+        return chosen;
     }
 
     private long sessionIdAt(int row) {

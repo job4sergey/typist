@@ -5,23 +5,32 @@ import com.typist.engine.TypedBigram;
 import com.typist.engine.TypingEngine;
 import com.typist.io.TextLibrary;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JRootPane;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.event.ActionEvent;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.IOException;
@@ -77,17 +86,28 @@ public final class MainFrame extends JFrame {
         listScroll.setBorder(null);
         listScroll.getViewport().setBackground(Theme.SURFACE);
 
+        JButton createText = new JButton("Create");
+        createText.setBackground(Theme.SURFACE);
+        createText.setForeground(Theme.ACCENT);
+        createText.setToolTipText("Ctrl+N");
+        createText.addActionListener(event -> openCreateDialog());
+
         JButton refreshTexts = new JButton("Refresh");
         refreshTexts.setBackground(Theme.SURFACE);
         refreshTexts.setForeground(Theme.ACCENT);
         refreshTexts.addActionListener(event -> reloadTexts());
+
+        JPanel textActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        textActions.setOpaque(false);
+        textActions.add(createText);
+        textActions.add(refreshTexts);
 
         JPanel textsHeader = new JPanel(new BorderLayout(4, 0));
         textsHeader.setOpaque(false);
         JLabel textsLabel = new JLabel("Texts");
         textsLabel.setForeground(Theme.MUTED);
         textsHeader.add(textsLabel, BorderLayout.WEST);
-        textsHeader.add(refreshTexts, BorderLayout.EAST);
+        textsHeader.add(textActions, BorderLayout.EAST);
 
         JPanel textsPanel = new JPanel(new BorderLayout(4, 4));
         textsPanel.setBackground(Theme.SURFACE);
@@ -128,6 +148,8 @@ public final class MainFrame extends JFrame {
         vertical.setResizeWeight(0.62);
         vertical.setBorder(null);
         add(vertical);
+        bindCreateShortcut();
+        bindExportShortcut();
 
         Timer ticker = new Timer(200, event -> updateLiveStats());
         ticker.start();
@@ -150,7 +172,53 @@ public final class MainFrame extends JFrame {
         updateLiveStats();
     }
 
+    private void bindCreateShortcut() {
+        JRootPane root = getRootPane();
+        KeyStroke stroke = KeyStroke.getKeyStroke(KeyEvent.VK_N, InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(stroke, "create-text");
+        root.getActionMap().put("create-text", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                openCreateDialog();
+            }
+        });
+    }
+
+    private void bindExportShortcut() {
+        JRootPane root = getRootPane();
+        KeyStroke enter = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(enter, "export-selected-session");
+        root.getActionMap().put("export-selected-session", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                statsPanel.exportSelectedSavedSession();
+            }
+        });
+    }
+
+    private void openCreateDialog() {
+        String suggested;
+        try {
+            suggested = texts.latestChangedFileName();
+        } catch (IOException ex) {
+            suggested = "";
+        }
+        CreateTextDialog.show(this, suggested).ifPresent(draft -> {
+            try {
+                Path written = texts.writeTextFile(draft.fileName(), draft.content());
+                currentFileName = written.getFileName().toString();
+                reloadTexts(true);
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "Could not import text: " + ex.getMessage());
+            }
+        });
+    }
+
     private void reloadTexts() {
+        reloadTexts(false);
+    }
+
+    private void reloadTexts(boolean forceLoad) {
         String keep = currentFileName;
         suppressTextLoad = true;
         textNames.clear();
@@ -170,10 +238,13 @@ public final class MainFrame extends JFrame {
             if (index < 0) {
                 index = indexOfLastUsedText();
             }
-            textList.setSelectedIndex(index);
+            final int selectedIndex = index;
+            textList.setSelectedIndex(selectedIndex);
+            textList.ensureIndexIsVisible(selectedIndex);
+            SwingUtilities.invokeLater(() -> textList.ensureIndexIsVisible(selectedIndex));
             suppressTextLoad = false;
-            String selected = textFiles.get(index).getFileName().toString();
-            if (!selected.equals(keep) || engine.getText().isEmpty()) {
+            String selected = textFiles.get(selectedIndex).getFileName().toString();
+            if (forceLoad || !selected.equals(keep) || engine.getText().isEmpty()) {
                 loadSelectedText();
             }
         } catch (IOException ex) {
@@ -287,6 +358,10 @@ public final class MainFrame extends JFrame {
     }
 
     private void updateLiveStats() {
+        statsPanel.refreshLive(engine, currentFileName, false);
+        if (engine.isStarted() && !engine.isFinished()) {
+            return;
+        }
         Character worst = engine.worstLetter();
         TypedBigram worstBigram = engine.worstBigram();
         String worstText = worst == null ? "—" : StatsPanel.formatLetter(worst);
@@ -300,6 +375,5 @@ public final class MainFrame extends JFrame {
                 worstBigramText,
                 engine.isFinished() ? "done — Esc restarts a new run" : "press Esc to restart"
         ));
-        statsPanel.refreshLive(engine, currentFileName, false);
     }
 }

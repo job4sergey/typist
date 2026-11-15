@@ -33,6 +33,9 @@ public final class TypingPane extends JTextPane {
         addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent event) {
+                if (event.isControlDown() && event.getKeyCode() != KeyEvent.VK_BACK_SPACE) {
+                    return;
+                }
                 if (event.getKeyCode() == KeyEvent.VK_ESCAPE
                         || event.getKeyCode() == KeyEvent.VK_BACK_SPACE
                         || event.getKeyCode() == KeyEvent.VK_TAB) {
@@ -48,6 +51,10 @@ public final class TypingPane extends JTextPane {
 
             @Override
             public void keyTyped(KeyEvent event) {
+                if (event.isControlDown() || event.isMetaDown() || event.isAltDown()) {
+                    event.consume();
+                    return;
+                }
                 char ch = event.getKeyChar();
                 if (ch == KeyEvent.VK_ESCAPE || ch == KeyEvent.VK_BACK_SPACE || ch == '\n') {
                     event.consume();

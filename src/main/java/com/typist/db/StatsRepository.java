@@ -391,6 +391,99 @@ public final class StatsRepository implements AutoCloseable {
         return file;
     }
 
+    public List<WordErrorAggregate> topErrorWords(int limit) throws SQLException {
+        List<WordErrorAggregate> words = new ArrayList<>();
+        try (PreparedStatement query = connection.prepareStatement(
+                """
+                SELECT word,
+                       COUNT(*) AS occurrences,
+                       SUM(CASE WHEN errors > 0 THEN 1 ELSE 0 END) AS error_occurrences,
+                       SUM(errors) AS total_errors,
+                       SUM(corrections) AS total_corrections,
+                       AVG(duration_ms) AS avg_duration_ms,
+                       AVG(ms_per_char) AS avg_ms_per_char,
+                       AVG(length) AS avg_length
+                FROM word_timings
+                GROUP BY word
+                HAVING SUM(errors) > 0
+                ORDER BY total_errors DESC, error_occurrences DESC, word ASC
+                LIMIT ?
+                """
+        )) {
+            query.setInt(1, Math.max(0, limit));
+            try (ResultSet rows = query.executeQuery()) {
+                while (rows.next()) {
+                    words.add(new WordErrorAggregate(
+                            rows.getString("word"),
+                            rows.getInt("occurrences"),
+                            rows.getInt("error_occurrences"),
+                            rows.getInt("total_errors"),
+                            rows.getInt("total_corrections"),
+                            rows.getDouble("avg_duration_ms"),
+                            rows.getDouble("avg_ms_per_char"),
+                            rows.getDouble("avg_length")
+                    ));
+                }
+            }
+        }
+        return words;
+    }
+
+    public List<WordTransitionAggregate> topTransitions(int limit) throws SQLException {
+        List<WordTransitionAggregate> transitions = new ArrayList<>();
+        try (PreparedStatement query = connection.prepareStatement(
+                """
+                SELECT a.word AS from_word,
+                       b.word AS to_word,
+                       COUNT(*) AS occurrences,
+                       AVG(a.transition_ms) AS avg_transition_ms,
+                       SUM(a.errors) AS from_errors,
+                       SUM(b.errors) AS to_errors,
+                       SUM(a.errors + b.errors) AS total_errors,
+                       AVG(a.duration_ms) AS avg_from_duration_ms,
+                       AVG(b.duration_ms) AS avg_to_duration_ms
+                FROM word_timings a
+                JOIN word_timings b
+                  ON a.session_id = b.session_id AND b.word_index = a.word_index + 1
+                WHERE a.transition_ms IS NOT NULL
+                GROUP BY a.word, b.word
+                ORDER BY total_errors DESC, avg_transition_ms DESC, from_word ASC, to_word ASC
+                LIMIT ?
+                """
+        )) {
+            query.setInt(1, Math.max(0, limit));
+            try (ResultSet rows = query.executeQuery()) {
+                while (rows.next()) {
+                    transitions.add(new WordTransitionAggregate(
+                            rows.getString("from_word"),
+                            rows.getString("to_word"),
+                            rows.getInt("occurrences"),
+                            rows.getDouble("avg_transition_ms"),
+                            rows.getInt("from_errors"),
+                            rows.getInt("to_errors"),
+                            rows.getInt("total_errors"),
+                            rows.getDouble("avg_from_duration_ms"),
+                            rows.getDouble("avg_to_duration_ms")
+                    ));
+                }
+            }
+        }
+        return transitions;
+    }
+
+    public String topErrorsJson(int limit) throws SQLException {
+        return SessionWordsJson.renderTopErrors(topErrorWords(limit), topTransitions(limit));
+    }
+
+    public Path exportTopErrorsJsonToFile(Path file, int limit) throws SQLException, java.io.IOException {
+        Path parent = file.getParent();
+        if (parent != null) {
+            java.nio.file.Files.createDirectories(parent);
+        }
+        java.nio.file.Files.writeString(file, topErrorsJson(limit));
+        return file;
+    }
+
     public List<BigramFailure> bigramFailuresForSession(long sessionId) throws SQLException {
         List<BigramFailure> failures = new ArrayList<>();
         try (PreparedStatement query = connection.prepareStatement(

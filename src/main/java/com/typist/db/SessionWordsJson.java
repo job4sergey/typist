@@ -42,6 +42,55 @@ public final class SessionWordsJson {
         return json.toString();
     }
 
+    public static String renderTopErrors(
+            List<WordErrorAggregate> words,
+            List<WordTransitionAggregate> transitions
+    ) {
+        StringBuilder json = new StringBuilder(1024);
+        json.append("{\n");
+        json.append("  \"top_error_words\": [\n");
+        for (int i = 0; i < words.size(); i++) {
+            WordErrorAggregate word = words.get(i);
+            json.append("    {\n");
+            field(json, "word", word.word(), true, 6);
+            field(json, "occurrences", word.occurrences(), true, 6);
+            field(json, "error_occurrences", word.errorOccurrences(), true, 6);
+            field(json, "total_errors", word.totalErrors(), true, 6);
+            field(json, "total_corrections", word.totalCorrections(), true, 6);
+            field(json, "avg_duration_ms", word.avgDurationMs(), true, 6);
+            field(json, "avg_ms_per_char", word.avgMsPerChar(), true, 6);
+            field(json, "avg_length", word.avgLength(), false, 6);
+            json.append("    }");
+            if (i + 1 < words.size()) {
+                json.append(',');
+            }
+            json.append('\n');
+        }
+        json.append("  ],\n");
+        json.append("  \"top_transitions\": [\n");
+        for (int i = 0; i < transitions.size(); i++) {
+            WordTransitionAggregate transition = transitions.get(i);
+            json.append("    {\n");
+            field(json, "from", transition.fromWord(), true, 6);
+            field(json, "to", transition.toWord(), true, 6);
+            field(json, "occurrences", transition.occurrences(), true, 6);
+            field(json, "avg_transition_ms", transition.avgTransitionMs(), true, 6);
+            field(json, "from_errors", transition.fromErrors(), true, 6);
+            field(json, "to_errors", transition.toErrors(), true, 6);
+            field(json, "total_errors", transition.totalErrors(), true, 6);
+            field(json, "avg_from_duration_ms", transition.avgFromDurationMs(), true, 6);
+            field(json, "avg_to_duration_ms", transition.avgToDurationMs(), false, 6);
+            json.append("    }");
+            if (i + 1 < transitions.size()) {
+                json.append(',');
+            }
+            json.append('\n');
+        }
+        json.append("  ]\n");
+        json.append("}\n");
+        return json.toString();
+    }
+
     private static void writeLetterFailures(StringBuilder json, List<LetterFailure> failures) {
         json.append("  \"letter_failures\": [\n");
         for (int i = 0; i < failures.size(); i++) {

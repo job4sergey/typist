@@ -129,4 +129,53 @@ class StatsRepositoryTest {
             assertTrue(java.nio.file.Files.readString(file).contains("norm1.txt"));
         }
     }
+
+    @Test
+    void exportsTopErrorWordsAndTransitions() throws Exception {
+        Path db = tempDir.resolve("typist.db");
+        try (StatsRepository repo = new StatsRepository(db)) {
+            Instant start = Instant.parse("2026-11-08T10:00:00Z");
+            repo.saveCompletedSession(
+                    start, start.plusSeconds(20), "a.txt", 10, 8, 3, 40.0, 80.0, 20_000,
+                    Map.of(),
+                    Map.of(),
+                    List.of(
+                            new WordOccurrence(0, "hello", 0, 5, 0, 400, 400, 5, 80.0, 50L, 2, 1),
+                            new WordOccurrence(1, "world", 6, 11, 450, 650, 200, 5, 50.0, null, 0, 0)
+                    )
+            );
+            repo.saveCompletedSession(
+                    start.plusSeconds(30), start.plusSeconds(50), "b.txt", 12, 9, 4, 42.0, 75.0, 20_000,
+                    Map.of(),
+                    Map.of(),
+                    List.of(
+                            new WordOccurrence(0, "hello", 0, 5, 0, 300, 300, 5, 60.0, 100L, 1, 0),
+                            new WordOccurrence(1, "there", 6, 11, 400, 900, 500, 5, 100.0, null, 3, 2)
+                    )
+            );
+
+            var words = repo.topErrorWords(50);
+            assertEquals(2, words.size());
+            assertEquals("hello", words.get(0).word());
+            assertEquals(3, words.get(0).totalErrors());
+            assertEquals(2, words.get(0).occurrences());
+            assertEquals(2, words.get(0).errorOccurrences());
+            assertEquals("there", words.get(1).word());
+            assertEquals(3, words.get(1).totalErrors());
+
+            var transitions = repo.topTransitions(50);
+            assertEquals(2, transitions.size());
+            assertEquals("hello", transitions.get(0).fromWord());
+            assertEquals("there", transitions.get(0).toWord());
+            assertEquals(4, transitions.get(0).totalErrors());
+            assertEquals("world", transitions.get(1).toWord());
+
+            String json = repo.topErrorsJson(50);
+            assertTrue(json.contains("\"top_error_words\""));
+            assertTrue(json.contains("\"top_transitions\""));
+            assertTrue(json.contains("\"word\": \"hello\""));
+            assertTrue(json.contains("\"from\": \"hello\""));
+            assertTrue(json.contains("\"to\": \"there\""));
+        }
+    }
 }
