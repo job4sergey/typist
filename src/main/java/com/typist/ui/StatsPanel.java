@@ -61,6 +61,7 @@ public final class StatsPanel extends JPanel {
     private final JLabel overallLabel;
     private final JLabel monthlySummary;
     private final JTable sessionsTable;
+    private final JTabbedPane tabs;
     private final JComboBox<YearMonth> monthPicker;
     private boolean updatingMonths;
     private boolean updatingSessions;
@@ -102,9 +103,20 @@ public final class StatsPanel extends JPanel {
                 return column == getColumnCount() - 1 && sessionIdAt(row) > 0;
             }
         };
-        sessionsTable = styledTable(sessionsModel);
+        sessionsTable = styledTable(new JTable(sessionsModel) {
+            @Override
+            public void changeSelection(int rowIndex, int columnIndex, boolean toggle, boolean extend) {
+                if (columnIndex == getColumnCount() - 1) {
+                    if (rowIndex >= 0 && !isRowSelected(rowIndex)) {
+                        super.changeSelection(rowIndex, columnIndex, false, false);
+                    }
+                    return;
+                }
+                super.changeSelection(rowIndex, columnIndex, toggle, extend);
+            }
+        });
         sessionsTable.setRowHeight(28);
-        sessionsTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        sessionsTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         sessionsTable.getSelectionModel().addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting() && !updatingSessions) {
                 loadSelectedSessionFailures();
@@ -128,7 +140,7 @@ public final class StatsPanel extends JPanel {
         );
         JSplitPane sessionSplit = new JSplitPane(
                 JSplitPane.HORIZONTAL_SPLIT,
-                wrap("Sessions — current run updates live; select a saved row for history", sessionsTable),
+                wrap("Sessions — Shift/Ctrl select several; Enter or Export writes them together", sessionsTable),
                 sessionFailures
         );
         sessionSplit.setResizeWeight(0.62);
@@ -167,7 +179,7 @@ public final class StatsPanel extends JPanel {
                 "Bigram failures for the selected month", styledTable(monthlyBigramsModel)
         ), BorderLayout.CENTER);
 
-        JTabbedPane tabs = new JTabbedPane();
+        tabs = new JTabbedPane();
         tabs.setBackground(Theme.SURFACE);
         tabs.setForeground(Theme.ACCENT);
         tabs.setOpaque(true);
@@ -234,11 +246,11 @@ public final class StatsPanel extends JPanel {
     }
 
     void exportSelectedSavedSession() {
-        Long id = selectedSessionId();
-        if (id == null || id <= 0) {
+        List<Long> ids = selectedSavedSessionIds();
+        if (ids.isEmpty()) {
             return;
         }
-        exportSessionWithChooser(id);
+        exportSessionsWithChooser(ids);
     }
 
     private void bindEnterToExport() {
@@ -255,13 +267,13 @@ public final class StatsPanel extends JPanel {
         sessionsTable.getActionMap().put("export-selected-session", exportSelected);
     }
 
-    private void exportSessionWithChooser(long sessionId) {
+    private void exportSessionsWithChooser(List<Long> sessionIds) {
         File chosen = chooseJsonFile("Export word timings", "word_timings.json");
         if (chosen == null) {
             return;
         }
         try {
-            Path file = stats.exportSessionWordsJsonToFile(sessionId, chosen.toPath());
+            Path file = stats.exportSessionWordsJsonToFile(sessionIds, chosen.toPath());
             JOptionPane.showMessageDialog(this, "Wrote " + file.toAbsolutePath());
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "Export failed: " + ex.getMessage());
@@ -346,6 +358,15 @@ public final class StatsPanel extends JPanel {
         int row = indexOfSession(sessionId);
         sessionsTable.setRowSelectionInterval(row, row);
         loadSelectedSessionFailures();
+    }
+
+    public void focusSessions() {
+        tabs.setSelectedIndex(0);
+        int row = sessionsTable.getSelectedRow();
+        if (row >= 0) {
+            sessionsTable.scrollRectToVisible(sessionsTable.getCellRect(row, 0, true));
+        }
+        sessionsTable.requestFocusInWindow();
     }
 
     private void loadMonthlyFailures() {
@@ -457,6 +478,17 @@ public final class StatsPanel extends JPanel {
         return ((Number) sessionsModel.getValueAt(row, 0)).longValue();
     }
 
+    private List<Long> selectedSavedSessionIds() {
+        List<Long> ids = new ArrayList<>();
+        for (int row : sessionsTable.getSelectedRows()) {
+            long id = sessionIdAt(row);
+            if (id > 0) {
+                ids.add(id);
+            }
+        }
+        return ids;
+    }
+
     private int indexOfSession(long sessionId) {
         for (int i = 0; i < sessionsModel.getRowCount(); i++) {
             if (((Number) sessionsModel.getValueAt(i, 0)).longValue() == sessionId) {
@@ -504,7 +536,10 @@ public final class StatsPanel extends JPanel {
     }
 
     private static JTable styledTable(DefaultTableModel model) {
-        JTable table = new JTable(model);
+        return styledTable(new JTable(model));
+    }
+
+    private static JTable styledTable(JTable table) {
         table.setFillsViewportHeight(true);
         table.setBackground(Theme.BACKGROUND);
         table.setForeground(Theme.TEXT_CORRECT);
@@ -595,10 +630,13 @@ public final class StatsPanel extends JPanel {
             button.setForeground(Color.BLACK);
             button.setBackground(Theme.ACCENT);
             button.addActionListener(event -> {
-                long id = sessionId;
                 fireEditingStopped();
-                if (id > 0) {
-                    exportSessionWithChooser(id);
+                List<Long> ids = selectedSavedSessionIds();
+                if (ids.isEmpty() && sessionId > 0) {
+                    ids = List.of(sessionId);
+                }
+                if (!ids.isEmpty()) {
+                    exportSessionsWithChooser(ids);
                 }
             });
         }

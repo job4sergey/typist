@@ -127,6 +127,20 @@ class StatsRepositoryTest {
             Path file = repo.exportSessionWordsJson(id, exports);
             assertEquals("session-" + id + ".json", file.getFileName().toString());
             assertTrue(java.nio.file.Files.readString(file).contains("norm1.txt"));
+
+            long id2 = repo.saveCompletedSession(
+                    start.plusSeconds(40), start.plusSeconds(70), "norm2.txt", 12, 11, 1, 50.0, 95.0, 30_000,
+                    Map.of('a', 1),
+                    Map.of(),
+                    List.of(second)
+            );
+            String combined = repo.sessionsWordsJson(List.of(id, id2));
+            assertTrue(combined.contains("\"session_count\": 2"));
+            assertTrue(combined.contains("\"sessions\""));
+            assertTrue(combined.contains("\"session_id\": " + id));
+            assertTrue(combined.contains("\"session_id\": " + id2));
+            assertTrue(combined.contains("norm1.txt"));
+            assertTrue(combined.contains("norm2.txt"));
         }
     }
 
@@ -153,15 +167,25 @@ class StatsRepositoryTest {
                             new WordOccurrence(1, "there", 6, 11, 400, 900, 500, 5, 100.0, null, 3, 2)
                     )
             );
+            repo.saveCompletedSession(
+                    start.plusSeconds(60), start.plusSeconds(70), "c.txt", 3, 2, 5, 30.0, 70.0, 10_000,
+                    Map.of(),
+                    Map.of(),
+                    List.of(
+                            new WordOccurrence(0, "the", 0, 3, 0, 80, 80, 3, 40.0, null, 5, 0)
+                    )
+            );
 
             var words = repo.topErrorWords(50);
             assertEquals(2, words.size());
             assertEquals("hello", words.get(0).word());
-            assertEquals(3, words.get(0).totalErrors());
             assertEquals(2, words.get(0).occurrences());
+            assertEquals(3, words.get(0).totalErrors());
             assertEquals(2, words.get(0).errorOccurrences());
             assertEquals("there", words.get(1).word());
+            assertEquals(1, words.get(1).occurrences());
             assertEquals(3, words.get(1).totalErrors());
+            assertTrue(words.stream().noneMatch(word -> word.word().equals("the")));
 
             var transitions = repo.topTransitions(50);
             assertEquals(2, transitions.size());

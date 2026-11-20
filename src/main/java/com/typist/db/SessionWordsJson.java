@@ -42,6 +42,30 @@ public final class SessionWordsJson {
         return json.toString();
     }
 
+    public static String renderMany(List<String> sessionJsons) {
+        if (sessionJsons == null || sessionJsons.isEmpty()) {
+            return "{\n  \"session_count\": 0,\n  \"sessions\": []\n}\n";
+        }
+        if (sessionJsons.size() == 1) {
+            return sessionJsons.get(0);
+        }
+        StringBuilder json = new StringBuilder(1024);
+        json.append("{\n");
+        json.append("  \"session_count\": ").append(sessionJsons.size()).append(",\n");
+        json.append("  \"sessions\": [\n");
+        String pad = "    ";
+        for (int i = 0; i < sessionJsons.size(); i++) {
+            String body = sessionJsons.get(i).strip().replace("\n", "\n" + pad);
+            json.append(pad).append(body);
+            if (i + 1 < sessionJsons.size()) {
+                json.append(',');
+            }
+            json.append('\n');
+        }
+        json.append("  ]\n}\n");
+        return json.toString();
+    }
+
     public static String renderTopErrors(
             List<WordErrorAggregate> words,
             List<WordTransitionAggregate> transitions

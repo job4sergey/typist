@@ -197,12 +197,8 @@ public final class MainFrame extends JFrame {
     }
 
     private void openCreateDialog() {
-        String suggested;
-        try {
-            suggested = texts.latestChangedFileName();
-        } catch (IOException ex) {
-            suggested = "";
-        }
+        String selected = textList.getSelectedValue();
+        String suggested = (selected == null || selected.isBlank()) ? "new.txt" : selected;
         CreateTextDialog.show(this, suggested).ifPresent(draft -> {
             try {
                 Path written = texts.writeTextFile(draft.fileName(), draft.content());
@@ -352,6 +348,8 @@ public final class MainFrame extends JFrame {
             statsPanel.reload();
             statsPanel.selectSession(sessionId);
             statsPanel.refreshLive(engine, currentFileName);
+            statsPanel.focusSessions();
+            SwingUtilities.invokeLater(statsPanel::focusSessions);
         } catch (SQLException ex) {
             JOptionPane.showMessageDialog(this, "Could not save session: " + ex.getMessage());
         }

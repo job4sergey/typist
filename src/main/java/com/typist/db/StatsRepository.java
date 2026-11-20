@@ -383,11 +383,26 @@ public final class StatsRepository implements AutoCloseable {
     }
 
     public Path exportSessionWordsJsonToFile(long sessionId, Path file) throws SQLException, java.io.IOException {
+        return exportSessionWordsJsonToFile(List.of(sessionId), file);
+    }
+
+    public String sessionsWordsJson(List<Long> sessionIds) throws SQLException {
+        List<String> bodies = new ArrayList<>();
+        for (Long sessionId : sessionIds) {
+            if (sessionId == null || sessionId <= 0) {
+                continue;
+            }
+            bodies.add(sessionWordsJson(sessionId));
+        }
+        return SessionWordsJson.renderMany(bodies);
+    }
+
+    public Path exportSessionWordsJsonToFile(List<Long> sessionIds, Path file) throws SQLException, java.io.IOException {
         Path parent = file.getParent();
         if (parent != null) {
             java.nio.file.Files.createDirectories(parent);
         }
-        java.nio.file.Files.writeString(file, sessionWordsJson(sessionId));
+        java.nio.file.Files.writeString(file, sessionsWordsJson(sessionIds));
         return file;
     }
 
@@ -404,9 +419,10 @@ public final class StatsRepository implements AutoCloseable {
                        AVG(ms_per_char) AS avg_ms_per_char,
                        AVG(length) AS avg_length
                 FROM word_timings
+                WHERE length >= 4
                 GROUP BY word
                 HAVING SUM(errors) > 0
-                ORDER BY total_errors DESC, error_occurrences DESC, word ASC
+                ORDER BY occurrences DESC, total_errors DESC, word ASC
                 LIMIT ?
                 """
         )) {

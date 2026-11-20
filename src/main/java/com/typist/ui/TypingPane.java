@@ -101,6 +101,8 @@ public final class TypingPane extends JTextPane {
         } catch (BadLocationException ex) {
             throw new IllegalStateException(ex);
         }
-        SwingUtilities.invokeLater(this::requestFocusInWindow);
+        if (!engine.isFinished()) {
+            SwingUtilities.invokeLater(this::requestFocusInWindow);
+        }
     }
 }
