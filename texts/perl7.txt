@@ -1,0 +1,1 @@
+use strict; use warnings; my %groups = ( admin => ['alice', 'bob'], guest => ['carol', 'dave'], ); my @results; for my $role (sort keys %groups) { my $users = $groups{$role}; for my $name (@{$users}) { next if length($name) < 4; push @results, "$role:$name"; } } my %counts; $counts{$_}++ for @results; for my $item (sort @results) { print "$item => $counts{$item}\n"; }

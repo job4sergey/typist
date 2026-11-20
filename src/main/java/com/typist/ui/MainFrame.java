@@ -197,8 +197,11 @@ public final class MainFrame extends JFrame {
     }
 
     private void openCreateDialog() {
-        String selected = textList.getSelectedValue();
-        String suggested = (selected == null || selected.isBlank()) ? "new.txt" : selected;
+        int index = textList.getSelectedIndex();
+        String suggested = "new.txt";
+        if (index >= 0 && index < textFiles.size()) {
+            suggested = textFiles.get(index).getFileName().toString();
+        }
         CreateTextDialog.show(this, suggested).ifPresent(draft -> {
             try {
                 Path written = texts.writeTextFile(draft.fileName(), draft.content());
